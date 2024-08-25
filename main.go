@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 	"log/slog"
 	"os"
+	"sort"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -24,6 +25,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Unable to create zap logger: %v\n", err)
 		os.Exit(1)
 	}
+	// Example of using zap logger with slog.
 	l := slog.New(slogzap.Option{Logger: z}.NewZapHandler())
 	connConfig.Tracer = &tracelog.TraceLog{
 		Logger:   &Logger{sl: l},
@@ -67,6 +69,36 @@ type Logger struct {
 	sl *slog.Logger
 }
 
-func (l *Logger) Log(ctx context.Context, level tracelog.LogLevel, msg string, data map[string]interface{}) {
-	l.sl.Log(ctx, slog.Level(level), msg, data)
+// Log I grab this adapter from this issue:
+// https://github.com/jackc/pgx/issues/1582
+func (l *Logger) Log(ctx context.Context, level tracelog.LogLevel, msg string, data map[string]any) {
+	var keys []string
+	for k := range data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var attrs []slog.Attr
+	for _, k := range keys {
+		attrs = append(attrs, slog.Any(k, data[k]))
+	}
+	l.sl.LogAttrs(ctx, translateLevel(level), msg, attrs...)
+}
+
+func translateLevel(level tracelog.LogLevel) slog.Level {
+	switch level {
+	case tracelog.LogLevelTrace:
+		return slog.LevelDebug
+	case tracelog.LogLevelDebug:
+		return slog.LevelDebug
+	case tracelog.LogLevelInfo:
+		return slog.LevelInfo
+	case tracelog.LogLevelWarn:
+		return slog.LevelWarn
+	case tracelog.LogLevelError:
+		return slog.LevelError
+	case tracelog.LogLevelNone:
+		return slog.LevelError
+	default:
+		return slog.LevelError
+	}
 }
